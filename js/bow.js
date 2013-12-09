@@ -1,35 +1,15 @@
 PLAYERS = [];
 CURRENT_PLAYER = 0;
-
-ACTION = {
-	attack: {
-		target: "unit",
-		cost:{
-			type: "none",
-			value: "1~2"
-		}
-	},
-	block: {
-		target: "self",
-		cost:{
-			type: "none",
-			value: "0"
-		}
-	},
-	heal: {
-		target: "self"
-	}
-};
+CURRENT_ACTION = null;
 
 
 $(function(){
 	$(".state").not("#state-menu").hide();
 	$(".btn-set").on("click", ".m-btn, .po-btn", btnHandler);
-	$("#player-list").on("click", ".player-list-item", viewPlayer);
+	$("#player-list").on("click", ".player-list-item", interactPlayer);
 });
 
 /* Handlers */
-
 function changeState(state){
 	$(".state").not("#state-" + state).hide();
 	$(".state#state-" + state).show();
@@ -39,20 +19,22 @@ function changeState(state){
 function startGame(){
 	$("#player-names .player-name").each(function(index, player){
 		var name = player.value == "" ? "Player " + (index+1) : player.value;
-		var p = new Player(name, 10, 10);
+		var p = new Player(name);
 		PLAYERS.push(p);
 	});
 	PLAYERS = shuffle(PLAYERS);
 	CURRENT_PLAYER = 0;
 
-	setPlayerList();
 	viewPlayer();
 }
 
 function setPlayerList(){
-	var out = "<h2 class='text-center'>Select a Player</h2>";
+	var cls = "player-list-item btn btn-default col-lg-6 bot-space";
+	var out = "<h2 class='text-center'><span id='p-action'></span> Player:</h2>";
+	var disabled = '';
 	for(i in PLAYERS){
-		out += "<a href='#' data-id='" + i + "' class='player-list-item form-control btn btn-default bot-space'>" + PLAYERS[i].name + "</a><br />";
+		disabled = CURRENT_PLAYER == i ? "disabled" : "";
+		out += "<a href='#' data-id='" + i + "' class='" + cls + "' " + disabled + ">" + PLAYERS[i].NAME + "</a>";
 	}
 	out += "<hr />";
 	$("#player-list").html(out).hide();
@@ -62,10 +44,38 @@ function viewPlayer(){
 	var index = $(this).data("id") || CURRENT_PLAYER;
 	var player = PLAYERS[index];
 
-	$("#cur-player").text(PLAYERS[CURRENT_PLAYER].name);
-	$("#player-info #current-player").text(player.name);
-	$("#player-info #p-hp").width((player.cur_hp/player.max_hp) * 100+ "%");
-	$("#player-info #p-mp").width((player.cur_mp/player.max_mp) * 100+ "%");
+	$("#cur-player").text(player.NAME);
+	$("#player-info #current-player").text(player.NAME);
+	$("#player-info #p-hp").width(player.getHP());
+	$("#player-info #p-mp").width(player.getMP());
+	setPlayerList();
+}
+
+function interactPlayer(){
+	var attacker = PLAYERS[CURRENT_PLAYER];
+	var index = $(this).data("id");
+	var attackee = PLAYERS[index];
+	switch(CURRENT_ACTION){
+		case "attack":
+			attacker.attack(attackee);
+			console.log(attacker.NAME + "[HP: "+attacker.CUR_HP+"] attacked " + attackee.NAME + "[HP: "+attackee.CUR_HP+"]");///
+			nextPlayer();
+			break;
+		case "heal":
+		break;
+	}
+	CURRENT_ACTION = null;
+}
+
+function nextPlayer(){
+	if(PLAYERS.length <= 1){
+		$("#winner").text(PLAYERS[0].NAME);
+		changeState("game-over");
+	}else{
+		CURRENT_PLAYER = (CURRENT_PLAYER + 1) % PLAYERS.length;
+		changeState("next-player-guide");
+		viewPlayer();	
+	}
 }
 
 function addPlayerInput(){
@@ -78,10 +88,23 @@ function addPlayerInput(){
 	}
 }
 
+function checkGameOver(){
+	if(PLAYERS.length == 1){
+		alert("Game Over");
+	}
+}
+
 function btnHandler(){
 	var value = $(this).text();
+	$("#player-list #p-action").text(value || "");
 	value = value.toLowerCase();
+	$("#player-list").hide();
+
 	switch(value){
+		case "menu":
+			changeState("menu");
+			startGame();
+			break;
 		case "play":
 			changeState("players");
 			break;
@@ -96,17 +119,31 @@ function btnHandler(){
 			startGame();
 			break;
 		case "pass":
-			CURRENT_PLAYER = (CURRENT_PLAYER + 1) % PLAYERS.length;
-			viewPlayer();
-			changeState("next-player-guide");
+			nextPlayer();
 			break;
 		case "next":
-			changeState("in-game");
+			if(typeof(PLAYERS[CURRENT_PLAYER]) == "undefined"){
+				nextPlayer();
+			}else{
+				if(PLAYERS[CURRENT_PLAYER].CUR_HP < 1){
+					changeState("info");
+					PLAYERS.splice(CURRENT_PLAYER, 1);
+				}else{
+					changeState("in-game");
+				}
+			}
 			break;
 		case "back":
 			changeState("menu");
 			break;
 		case "attack":
+			CURRENT_ACTION = value;
+			$("#player-list a[data-id='"+CURRENT_PLAYER+"']").attr("disabled", true);
+			$("#player-list").show();
+			break;
+		case "heal":
+			CURRENT_ACTION = value;
+			$("#player-list a[data-id='"+CURRENT_PLAYER+"']").attr("disabled", false);
 			$("#player-list").show();
 			break;
 		case "exit":
@@ -149,10 +186,40 @@ function shuffle(array) {
   return array;
 }
 
-var Player = function(name, hp, mp){
-	return {name: name, cur_hp: hp, max_hp: hp, cur_mp: mp, max_mp: mp};
+
+/* Player Class */
+Player = function(name, hp, mp){
+	this.NAME =  name || "Player";
+	this.MAX_HP = hp || 3;
+	this.MAX_MP = mp || 3;
+
+	this.CUR_HP = this.MAX_HP; 
+	this.CUR_MP = this.MAX_MP; 
+
+	this.DAMAGE = {MIN: 1, MAX: 3};
 }
 
-function randomRange(min, max){
-	return parseInt( min + (Math.random() * ( (max+1) - min) ) );
-}
+/*
+	@params - attackee - the Player that is being attacked.
+*/
+Player.prototype.attack = function(attackee){
+	if(attackee instanceof Player){
+		attackee.CUR_HP = attackee.CUR_HP - this.getDamage();
+		if(this.CUR_HP < 1){
+			return "dead";
+		}else{
+			return "alive"
+		}
+	}
+};
+
+Player.prototype.getHP = function(){	return ( ((this.CUR_HP/this.MAX_HP) * 100) + "%");	};
+Player.prototype.getMP = function(){	return ( ((this.CUR_MP/this.MAX_MP) * 100) + "%");	};
+
+Player.prototype.getDamage = function(){
+	var min = this.DAMAGE.MIN;
+	var step = this.DAMAGE.MAX - this.DAMAGE.MIN;
+	return parseInt( min + (Math.random() * step) );
+};
+
+/* End of Player Class */
